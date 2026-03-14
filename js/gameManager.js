@@ -18,7 +18,9 @@ class GameManager extends ScreenManager {
     this.titleScreen = new TitleScreen();
     this.databaseScreen = new DatabaseScreen();
 
-    this.pushScreen(this.titleScreen);
+    // SplashScreen provides attribution and a user gesture to unlock audio.
+    // After clicking "Start Game", it swaps to the TitleScreen where music plays.
+    this.pushScreen(new SplashScreen());
   }
 
   resetTimeLoop() {
