@@ -39,6 +39,8 @@ These `.js` files have no direct `.pde` counterpart:
 
 **`tools/convert-assets.js`** — Node.js script that converts sector `.json` files and `.vlw` bitmap font files into `.js` data files. See [Asset Loading](#asset-loading).
 
+**`SplashScreen` (in `titleScreen.js`)** — A pre-game screen showing fan content attribution, clickable links to the original game and the port's source code, and a "Start Game" button. This screen serves two purposes: (1) it satisfies the Mobius Digital Fan Content Policy by displaying attribution before gameplay, and (2) the "Start Game" click provides the user gesture required by browser autoplay policies to unlock audio. Without this, the kazoo theme on the TitleScreen would be silently blocked. The links are rendered as HTML `<a>` elements overlaid on the canvas (created in `onEnter()`, removed in `onExit()`), since canvas-drawn text cannot be made clickable.
+
 ---
 
 ## Constructor Overloading
@@ -225,6 +227,8 @@ The port's `tools/convert-assets.js` parses this binary format at build time and
 
 **Fill color tracking**: `BitmapText.fillColor` is updated whenever the overridden `fill()` is called. For alignment and size, the system reads directly from `window._renderer._textAlign`, `_textBaseline`, and `_textSize` to stay in sync with p5's internal state (important after `push()`/`pop()` which restore p5's internals without calling the overridden functions).
 
+**Tint optimization**: p5.js's `tint()` function creates a temporary offscreen canvas for every `image()` call, which is very expensive when rendering hundreds of characters per frame (especially in Safari). The port avoids `tint()` entirely by pre-generating colored glyph canvases: when a glyph is first drawn in a particular fill color, a colored copy is created using `globalCompositeOperation = 'source-in'` and cached on the glyph object. Subsequent frames draw the cached canvas directly via `drawingContext.drawImage()`, bypassing p5.js's image pipeline. The cache is keyed by RGB color, so each glyph+color combination is only generated once.
+
 **CSS fallback**: `textFont('Consolas, "Courier New", monospace')` is set in `setup()` as a fallback. It is not used for actual rendering — the bitmap system intercepts all `text()` calls. It exists so that if the bitmap system were disabled, text would still render in a monospace font.
 
 ---
@@ -237,15 +241,20 @@ static Minim minim;
 static AudioPlayer kazooTheme;
 ```
 
-The port uses the **HTML5 Audio API**:
+The port uses **HTML5 Audio** routed through the **Web Audio API** (`AudioContext`):
 ```javascript
 SoundLibrary.kazooTheme = new Audio('data/audio/ow_kazoo_theme.mp3');
+// In AudioManager.init():
+this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+const source = this.ctx.createMediaElementSource(SoundLibrary.kazooTheme);
+source.connect(this.ctx.destination);
 ```
 
 Key differences:
 
 - **Architecture**: The original uses a constructor-based `AudioManager` class with static methods. The port uses singleton objects (`SoundLibrary` and `AudioManager`) with an explicit `init()` method that must be called during `setup()`.
-- **Autoplay policy**: Browsers block audio playback until the user interacts with the page. The port wraps `.play()` in a `.catch()` to suppress `NotAllowedError` from autoplay restrictions. The original has no such concern.
+- **Autoplay policy**: Browsers suspend the `AudioContext` until a user gesture occurs. The `SplashScreen` (see [New Files](#new-files)) provides this gesture — clicking "Start Game" calls `AudioManager.unlock()` which resumes the `AudioContext`. The `TitleScreen` then plays the kazoo theme reliably. The `.play()` call also includes a `.catch()` that suppresses `NotAllowedError` as a fallback.
+- **Why AudioContext**: Routing the HTML5 Audio element through an `AudioContext` via `createMediaElementSource()` means a single `ctx.resume()` call unlocks all audio. Without this, each audio element would need to be individually unlocked with a user gesture.
 - **Play behavior**: The port adds `currentTime = 0` before each `play()` call, which always restarts from the beginning. The original's Minim `play()` resumes from the current position after a `pause()`. In practice this doesn't matter because the game only has one track and always starts it fresh.
 
 ---

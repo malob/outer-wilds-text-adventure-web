@@ -84,7 +84,7 @@ The original uses Processing's `.vlw` bitmap font format — Consolas at 14px an
 
 - **Anti-aliasing on shapes and lines.** Processing's `noSmooth()` disables anti-aliasing globally. The HTML5 Canvas 2D API does not support disabling shape anti-aliasing — `noSmooth()` in p5.js only affects image scaling. Lines and ellipses may appear slightly smoother.
 - **Quit/Exit buttons.** The original calls Processing's `exit()`. Browsers cannot close their own tab, so these buttons do nothing.
-- **Audio autoplay.** Browsers may block the kazoo theme until the user interacts with the page.
+- **Splash screen.** A pre-game attribution screen (new to the web port) shows credits and links before the game. Clicking "Start Game" unlocks browser audio, so the kazoo theme plays reliably on the title screen.
 - **Actor removal bugfix.** The original iterates actors forward while removing dead ones, which can skip an adjacent actor. The port iterates in reverse, fixing this latent bug.
 
 ### Intentional Non-Changes
