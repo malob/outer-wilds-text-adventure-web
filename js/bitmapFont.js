@@ -46,6 +46,32 @@ class BitmapFont {
     return this.glyphs[charCode] || null;
   }
 
+  // Returns a pre-tinted canvas for a glyph at a specific color.
+  // Cached per glyph+color so tinting only happens once, not every frame.
+  // This avoids p5.js's expensive tint() which creates a temp canvas per image() call.
+  getColoredCanvas(glyph, colorKey, r, g, b) {
+    if (!glyph._colorCache) glyph._colorCache = {};
+    if (glyph._colorCache[colorKey]) return glyph._colorCache[colorKey];
+
+    const w = glyph.width;
+    const h = glyph.height;
+    const cvs = document.createElement('canvas');
+    cvs.width = w;
+    cvs.height = h;
+    const ctx = cvs.getContext('2d');
+
+    // Draw the original white-with-alpha glyph
+    ctx.drawImage(glyph.img.canvas, 0, 0);
+
+    // Multiply with the desired color (replaces white with the color, preserves alpha)
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+    ctx.fillRect(0, 0, w, h);
+
+    glyph._colorCache[colorKey] = cvs;
+    return cvs;
+  }
+
   getLineHeight() {
     return this.ascent + this.descent;
   }
@@ -116,27 +142,32 @@ const BitmapText = {
     const scale = renderSize / font.fontSize;
     const lineH = font.getLineHeight() * scale;
 
-    push();
-    // noSmooth() ensures nearest-neighbor scaling for pixel-perfect look
-    noSmooth();
-    imageMode(CORNER);
-
-    // Apply fill color as tint
+    // Extract RGB from the current fill color for pre-tinted glyph caching.
+    // This avoids p5.js's tint() which creates a temp canvas per image() call.
+    let r = 255, g = 255, b = 255;
+    let colorKey = 'fff';
     if (this.fillColor) {
-      tint(this.fillColor);
+      r = Math.round(red(this.fillColor));
+      g = Math.round(green(this.fillColor));
+      b = Math.round(blue(this.fillColor));
+      colorKey = r.toString(16) + g.toString(16) + b.toString(16);
     }
+
+    // Save canvas state for imageSmoothingEnabled and imageMode
+    const ctx = drawingContext;
+    const prevSmoothing = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
 
     if (boxW !== undefined && boxH !== undefined) {
-      this._drawWrapped(str, x, y, boxW, boxH, font, renderSize, scale, lineH, hAlign, vAlign);
+      this._drawWrapped(str, x, y, boxW, boxH, font, renderSize, scale, lineH, hAlign, vAlign, colorKey, r, g, b);
     } else {
-      this._drawSingleBlock(str, x, y, font, renderSize, scale, lineH, hAlign, vAlign);
+      this._drawSingleBlock(str, x, y, font, renderSize, scale, lineH, hAlign, vAlign, colorKey, r, g, b);
     }
 
-    noTint();
-    pop();
+    ctx.imageSmoothingEnabled = prevSmoothing;
   },
 
-  _drawSingleBlock(str, x, y, font, renderSize, scale, lineH, hAlign, vAlign) {
+  _drawSingleBlock(str, x, y, font, renderSize, scale, lineH, hAlign, vAlign, colorKey, r, g, b) {
     const lines = String(str).split('\n');
 
     // Compute total block height for vertical alignment
@@ -167,11 +198,11 @@ const BitmapText = {
         startX = x;
       }
 
-      this._renderLine(line, startX, startY + li * lineH, font, scale);
+      this._renderLine(line, startX, startY + li * lineH, font, scale, colorKey, r, g, b);
     }
   },
 
-  _drawWrapped(str, x, y, boxW, boxH, font, renderSize, scale, lineH, hAlign, vAlign) {
+  _drawWrapped(str, x, y, boxW, boxH, font, renderSize, scale, lineH, hAlign, vAlign, colorKey, r, g, b) {
     // Word-wrap text into the box, matching Processing's text(str, x, y, w, h)
     const words = String(str).split(/(\s+)/);
     const lines = [];
@@ -230,24 +261,27 @@ const BitmapText = {
         startX = x;
       }
 
-      this._renderLine(line, startX, lineY, font, scale);
+      this._renderLine(line, startX, lineY, font, scale, colorKey, r, g, b);
     }
   },
 
-  _renderLine(line, startX, baselineY, font, scale) {
+  _renderLine(line, startX, baselineY, font, scale, colorKey, r, g, b) {
+    const ctx = drawingContext;
     let cx = startX;
     for (let i = 0; i < line.length; i++) {
       const code = line.charCodeAt(i);
-      const g = font.getGlyph(code);
-      if (g && g.img) {
-        const dx = cx + g.leftExtent * scale;
-        const dy = baselineY - g.topExtent * scale;
-        const dw = g.width * scale;
-        const dh = g.height * scale;
-        image(g.img, dx, dy, dw, dh);
+      const glyph = font.getGlyph(code);
+      if (glyph && glyph.img) {
+        const dx = cx + glyph.leftExtent * scale;
+        const dy = baselineY - glyph.topExtent * scale;
+        const dw = glyph.width * scale;
+        const dh = glyph.height * scale;
+        // Use pre-tinted cached canvas instead of p5's tint() + image()
+        const colored = font.getColoredCanvas(glyph, colorKey, r, g, b);
+        ctx.drawImage(colored, dx, dy, dw, dh);
       }
-      if (g) {
-        cx += g.setWidth * scale;
+      if (glyph) {
+        cx += glyph.setWidth * scale;
       } else {
         cx += font.fontSize * 0.5 * scale;
       }
